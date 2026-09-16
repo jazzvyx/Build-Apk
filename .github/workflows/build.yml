@@ -2,10 +2,22 @@ name: Build APK
 on:
   workflow_dispatch:
     inputs:
+      zip_url:
+        description: ZIP url
+        required: false
+      tag:
+        description: Tag
+        required: false
+      build_type:
+        description: Build type
+        required: false
       mode:
         description: Build mode
-        required: true
+        required: false
         default: release
+      file:
+        description: File
+        required: false
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -18,13 +30,20 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
-      - name: Build
+      - name: Download ZIP
         run: |
-          unzip -o "*.zip" -d . || true
-          DIR=$(find . -name "pubspec.yaml" | head -n 1 | xargs dirname)
+          if [ ! -z "${{ inputs.zip_url }}" ]; then
+            wget -O source.zip "${{ inputs.zip_url }}" || curl -L -o source.zip "${{ inputs.zip_url }}"
+            unzip -o source.zip -d .
+          else
+            unzip -o "*.zip" -d . || true
+          fi
+      - name: Build APK
+        run: |
+          DIR=$(find . -maxdepth 4 -name "pubspec.yaml" | head -n 1 | xargs dirname)
           cd $DIR
           flutter pub get
-          flutter build apk --${{ github.event.inputs.mode }}
+          flutter build apk --release --no-tree-shake-icons
       - uses: actions/upload-artifact@v4
         with:
           name: apk-result
