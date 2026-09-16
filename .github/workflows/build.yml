@@ -32,15 +32,20 @@ jobs:
           channel: stable
       - name: Download ZIP
         run: |
-          if [ ! -z "${{ inputs.zip_url }}" ]; then
-            wget -O source.zip "${{ inputs.zip_url }}" || curl -L -o source.zip "${{ inputs.zip_url }}"
-            unzip -o source.zip -d .
+          ls -la
+          echo "URL: ${{ inputs.zip_url }}"
+          if [ -n "${{ inputs.zip_url }}" ]; then
+            curl -L --max-time 300 -o source.zip "${{ inputs.zip_url }}" || wget -O source.zip "${{ inputs.zip_url }}"
+            ls -lh source.zip
+            unzip -o source.zip -d . || true
           else
-            unzip -o "*.zip" -d . || true
+            unzip -o *.zip -d . || true
           fi
+          ls -la
       - name: Build APK
         run: |
           DIR=$(find . -maxdepth 4 -name "pubspec.yaml" | head -n 1 | xargs dirname)
+          echo "Found dir: $DIR"
           cd $DIR
           flutter pub get
           flutter build apk --release --no-tree-shake-icons
