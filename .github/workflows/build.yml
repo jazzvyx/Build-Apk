@@ -18,38 +18,77 @@ on:
       file:
         description: File
         required: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '17'
-      - uses: subosito/flutter-action@v2
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
         with:
           channel: stable
-      - name: Download ZIP
+          cache: true
+
+      - name: Download & Extract ZIP
         run: |
-          ls -la
-          echo "URL: ${{ inputs.zip_url }}"
+          set -x
+          rm -rf source.zip project
+          mkdir -p project
           if [ -n "${{ inputs.zip_url }}" ]; then
-            curl -L --max-time 300 -o source.zip "${{ inputs.zip_url }}" || wget -O source.zip "${{ inputs.zip_url }}"
-            ls -lh source.zip
-            unzip -o source.zip -d . || true
-          else
-            unzip -o *.zip -d . || true
+            echo "Download from ${{ inputs.zip_url }}"
+            curl -L -k --retry 3 -o source.zip "${{ inputs.zip_url }}" || wget --no-check-certificate -O source.zip "${{ inputs.zip_url }}"
           fi
-          ls -la
+          # unzip semua zip yang ada
+          for z in *.zip source.zip; do
+            [ -f "$z" ] && unzip -o -q "$z" -d project || true
+          done
+          ls -la project
+          find project -maxdepth 3 -type f | head -n 30
+
       - name: Build APK
         run: |
-          DIR=$(find . -maxdepth 4 -name "pubspec.yaml" | head -n 1 | xargs dirname)
-          echo "Found dir: $DIR"
-          cd $DIR
-          flutter pub get
-          flutter build apk --release --no-tree-shake-icons
-      - uses: actions/upload-artifact@v4
+          set -x
+          # cari pubspec.yaml
+          PUB=$(find project -name "pubspec.yaml" | head -n 1)
+          if [ -n "$PUB" ]; then
+            echo "FLUTTER PROJECT DETECTED: $PUB"
+            DIR=$(dirname "$PUB")
+            cd "$DIR"
+            flutter clean
+            flutter pub get
+            flutter build apk --release --no-tree-shake-icons --verbose
+            APK_PATH=$(find build -name "*.apk" | head -n 1)
+            echo "APK=$APK_PATH"
+            mkdir -p /tmp/apk
+            cp -r build/app/outputs/flutter-apk/* /tmp/apk/ || cp "$APK_PATH" /tmp/apk/
+          else
+            echo "ANDROID NATIVE PROJECT DETECTED"
+            GRADLE=$(find project -name "gradlew" | head -n 1)
+            if [ -z "$GRADLE" ]; then
+              echo "gradlew not found, listing..."
+              find project -type f -name "*.gradle" | head -n 20
+              exit 1
+            fi
+            DIR=$(dirname "$GRADLE")
+            cd "$DIR"
+            chmod +x gradlew
+            ./gradlew assembleRelease --stacktrace
+            mkdir -p /tmp/apk
+            find . -name "*.apk" -exec cp {} /tmp/apk/ \;
+          fi
+          ls -lh /tmp/apk/
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
         with:
           name: apk-result
-          path: "**/build/app/outputs/flutter-apk/*.apk"
+          path: /tmp/apk/*.apk
+          if-no-files-found: error
